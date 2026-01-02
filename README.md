@@ -4,6 +4,9 @@ This part of the knowledge bank is a Proxy server to analyze the traffic that go
 ## Start the proxy
 `go run emoProxy.go`
 
+### Alternatively start with air
+`air run emoProxy.go`
+
 ## Docker setup
 You can find a simplified setup using Docker Compose by SebbeJohansson here: https://github.com/SebbeJohansson/emo-proxy-docker
 It uses nginx, dnsmasq, and mitmproxy to be able to pass through the api requests to the EMO Proxy.
