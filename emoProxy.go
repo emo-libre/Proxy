@@ -32,11 +32,13 @@ type Configuration struct {
 	Livingio_RES_Server     string `json:"livingio_res_server"`
 	PostFS                  string `json:"postFS"`
 	LogFileName             string `json:"logFileName"`
+	EnableDatabaseAndAPI    bool   `json:"enableDatabaseAndAPI"`
 	SqliteLocation          string `json:"sqliteLocation"`
 }
 
 var (
-	conf Configuration
+	conf              Configuration
+	useDatabaseAndAPI bool = false
 )
 
 func main() {
@@ -70,15 +72,23 @@ func main() {
 	log.SetOutput(logFile)
 	log.SetFlags(log.Lshortfile | log.LstdFlags)
 
-	dbPath := conf.SqliteLocation
-	flagDbPath := flag.String("db", "", "path to the sqlite database file")
-	if *flagDbPath != "" {
-		dbPath = *flagDbPath
-	}
-	flag.Parse()
-	dbCreateErr := InitDB(dbPath)
-	if dbCreateErr != nil {
-		log.Panic(dbCreateErr)
+	useDatabaseAndAPI = conf.EnableDatabaseAndAPI
+
+	if useDatabaseAndAPI {
+		log.Println("Database and API enabled")
+
+		dbPath := conf.SqliteLocation
+		flagDbPath := flag.String("db", "", "path to the sqlite database file")
+		if *flagDbPath != "" {
+			dbPath = *flagDbPath
+		}
+		flag.Parse()
+		dbCreateErr := InitDB(dbPath)
+		if dbCreateErr != nil {
+			log.Panic(dbCreateErr)
+		}
+	} else {
+		log.Println("Note: Database and API disabled")
 	}
 
 	// handle time requests
@@ -166,19 +176,21 @@ func main() {
 		fmt.Fprint(w, body)
 	})
 
-	// proxy-api endpoints
-	http.HandleFunc("/proxy-api/requests", func(w http.ResponseWriter, r *http.Request) {
-		logRequest(r)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
+	if useDatabaseAndAPI {
+		// proxy-api endpoints
+		http.HandleFunc("/proxy-api/requests", func(w http.ResponseWriter, r *http.Request) {
+			logRequest(r)
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusOK)
 
-		requests, err := getAllRequests()
-		if err != nil {
-			http.Error(w, fmt.Sprintf(`{"error":"%v"}`, err), http.StatusInternalServerError)
-			return
-		}
-		json.NewEncoder(w).Encode(requests)
-	})
+			requests, err := getAllRequests()
+			if err != nil {
+				http.Error(w, fmt.Sprintf(`{"error":"%v"}`, err), http.StatusInternalServerError)
+				return
+			}
+			json.NewEncoder(w).Encode(requests)
+		})
+	}
 
 	log.Fatal(http.ListenAndServe(":"+strconv.Itoa(*Port), corsMiddleware(http.DefaultServeMux)))
 }
@@ -209,6 +221,7 @@ func loadConfig(filename string) error {
 		Livingio_RES_Server:     "res.living.ai",
 		PostFS:                  "/tmp/",
 		LogFileName:             "/var/log/emoProxy.log",
+		EnableDatabaseAndAPI:    false,
 		SqliteLocation:          "/var/data/emo_logs.db",
 	}
 
@@ -316,7 +329,10 @@ func makeApiRequest(r *http.Request) string {
 	log.Println("Server response: ", string(body))
 
 	logResponse(response)
-	saveRequest(r.URL.RequestURI(), string(requestBody), string(body))
+
+	if useDatabaseAndAPI {
+		saveRequest(r.URL.RequestURI(), string(requestBody), string(body))
+	}
 	return string(body)
 }
 
@@ -349,7 +365,10 @@ func makeTtsRequest(r *http.Request) string {
 	// write post request body to fs
 	logBody(response.Header.Get("Content-Type"), body, "tts_")
 	logResponse(response)
-	saveRequest(r.URL.RequestURI(), "", "")
+
+	if useDatabaseAndAPI {
+		saveRequest(r.URL.RequestURI(), "", "")
+	}
 	return string(body)
 }
 
@@ -382,7 +401,10 @@ func makeApiTtsRequest(r *http.Request) string {
 	// write post request body to fs
 	logBody(response.Header.Get("Content-Type"), body, "apitts_")
 	logResponse(response)
-	saveRequest(r.URL.RequestURI(), "", string(body))
+
+	if useDatabaseAndAPI {
+		saveRequest(r.URL.RequestURI(), "", string(body))
+	}
 	return string(body)
 }
 
@@ -419,6 +441,9 @@ func makeResRequest(r *http.Request, w http.ResponseWriter) string {
 	}
 
 	logResponse(response)
-	saveRequest(r.URL.RequestURI(), "", string(body))
+
+	if useDatabaseAndAPI {
+		saveRequest(r.URL.RequestURI(), "", string(body))
+	}
 	return string(body)
 }

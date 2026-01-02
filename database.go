@@ -2,7 +2,7 @@ package main
 
 import (
 	"database/sql"
-	"fmt"
+	"log"
 
 	_ "modernc.org/sqlite"
 )
@@ -30,10 +30,10 @@ func InitDB(path string) error {
 }
 
 func saveRequest(requestEndPoint string, payload string, response string) {
-	fmt.Println("Saving request to DB...")
+	log.Println("Saving request to DB...")
 	_, err := DB.Exec("INSERT INTO requests (endpoint, payload, response) VALUES (?, ?, ?)", requestEndPoint, payload, response)
 	if err != nil {
-		fmt.Println("Failed to save to DB: ", err)
+		log.Println("Failed to save to DB: ", err)
 	}
 }
 
