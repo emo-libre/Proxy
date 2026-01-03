@@ -3,3 +3,9 @@
 *.code-workspace
 **/bin/
 **/obj/
+
+# App specific ignores
+emoProxy.conf
+data/
+# tmp is used for air
+tmp/

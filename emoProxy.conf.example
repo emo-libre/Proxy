@@ -5,5 +5,7 @@
     "livingio_tts_server": "eu-tts.living.ai",
     "livingio_res_server": "res.living.ai",
     "postFS": "/tmp/",
-    "logFileName": "/var/log/emoProxyss.log"
+    "logFileName": "/var/log/emoProxyss.log",
+    "enableDatabaseAndAPI": false, # For now, default behavior is still without db and api.
+    "sqliteLocation": "/var/data/emo_logs.db"
 }
