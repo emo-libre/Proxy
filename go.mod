@@ -1,6 +1,6 @@
 module emoProxy
 
-go 1.24.0
+go 1.24
 
 require modernc.org/sqlite v1.42.2
 
