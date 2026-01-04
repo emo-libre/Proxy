@@ -35,6 +35,8 @@ func saveRequest(requestEndPoint string, payload string, response string) {
 	if err != nil {
 		log.Println("Failed to save to DB: ", err)
 	}
+
+	// TODO: implement a cleanup mechanism to limit DB size
 }
 
 func getAllRequests() ([]map[string]interface{}, error) {

@@ -43,11 +43,13 @@ var (
 
 func main() {
 	log.Println("Starting application...")
-	//load config
+	//parse flags
 	confFile := flag.String("c", "emoProxy.conf", "config file to use")
 	Port := flag.Int("port", 8080, "http port")
+	flagDbPath := flag.String("db", "", "path to the sqlite database file")
 	flag.Parse()
 
+	//load config
 	err := loadConfig(*confFile)
 	if err != nil {
 		log.Println("can't read conf file", *confFile, "- using default config")
@@ -58,7 +60,6 @@ func main() {
 	// disable ssl checks
 	http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 
-	// parse flags
 	log.Println("Starting app on port: ", *Port)
 
 	// redirect log
@@ -71,25 +72,70 @@ func main() {
 	log.SetOutput(logFile)
 	log.SetFlags(log.Lshortfile | log.LstdFlags)
 
-	useDatabaseAndAPI = conf.EnableDatabaseAndAPI
+	registerEMOEndpoints()
 
-	if useDatabaseAndAPI {
+	if conf.EnableDatabaseAndAPI {
 		log.Println("Database and API enabled")
 
 		dbPath := conf.SqliteLocation
-		flagDbPath := flag.String("db", "", "path to the sqlite database file")
 		if *flagDbPath != "" {
 			dbPath = *flagDbPath
 		}
-		flag.Parse()
 		dbCreateErr := InitDB(dbPath)
 		if dbCreateErr != nil {
 			log.Panic(dbCreateErr)
 		}
+
+		registerAPIEndpoints()
 	} else {
 		log.Println("Note: Database and API disabled")
 	}
 
+	log.Fatal(http.ListenAndServe(":"+strconv.Itoa(*Port), nil))
+}
+
+func loadConfig(filename string) error {
+	DefaultConf := Configuration{
+		PidFile:                 "/var/run/emoProxy.pid",
+		Livingio_API_Server:     "api.living.ai",
+		Livingio_API_TTS_Server: "eu-api.living.ai",
+		Livingio_TTS_Server:     "eu-tts.living.ai",
+		Livingio_RES_Server:     "res.living.ai",
+		PostFS:                  "/tmp/",
+		LogFileName:             "/var/log/emoProxy.log",
+		EnableDatabaseAndAPI:    false,
+		SqliteLocation:          "/var/data/emo_logs.db",
+	}
+
+	bytes, err := os.ReadFile(filename)
+	if err != nil {
+		conf = DefaultConf
+		return err
+	}
+
+	err = json.Unmarshal(bytes, &DefaultConf)
+	if err != nil {
+		conf = Configuration{}
+		return err
+	}
+
+	conf = DefaultConf
+	return nil
+}
+
+func writePid() {
+	if conf.PidFile != "" {
+		f, err := os.OpenFile(conf.PidFile, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
+		if err != nil {
+			log.Fatalf("Unable to create pid file : %v", err)
+		}
+		defer f.Close()
+
+		f.WriteString(fmt.Sprintf("%d", os.Getpid()))
+	}
+}
+
+func registerEMOEndpoints() {
 	// handle time requests
 	http.HandleFunc("/time", func(w http.ResponseWriter, r *http.Request) {
 		logRequest(r)
@@ -174,82 +220,24 @@ func main() {
 
 		fmt.Fprint(w, body)
 	})
-
-	if useDatabaseAndAPI {
-		// proxy-api endpoints
-		http.HandleFunc("/proxy-api/requests", func(w http.ResponseWriter, r *http.Request) {
-			logRequest(r)
-			w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			w.WriteHeader(http.StatusOK)
-
-			requests, err := getAllRequests()
-			if err != nil {
-				http.Error(w, fmt.Sprintf(`{"error":"%v"}`, err), http.StatusInternalServerError)
-				return
-			}
-			json.NewEncoder(w).Encode(requests)
-		})
-	}
-
-	log.Fatal(http.ListenAndServe(":"+strconv.Itoa(*Port), corsMiddleware(http.DefaultServeMux)))
 }
 
-func corsMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Replace "*" with "http://localhost:3000" for better security
-		w.Header().Set("Access-Control-Allow-Origin", "http://localhost:3000")
+func registerAPIEndpoints() {
+	// register proxy-api endpoints
+	http.HandleFunc("/proxy-api/requests", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "http://localhost:3000") // TODO: make configurable
 		w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
 		w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, Authorization")
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
 
-		// Handle the preflight OPTIONS request
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusOK)
+		requests, err := getAllRequests()
+		if err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":"%v"}`, err), http.StatusInternalServerError)
 			return
 		}
-
-		next.ServeHTTP(w, r)
+		json.NewEncoder(w).Encode(requests)
 	})
-}
-
-func loadConfig(filename string) error {
-	DefaultConf := Configuration{
-		PidFile:                 "/var/run/emoProxy.pid",
-		Livingio_API_Server:     "api.living.ai",
-		Livingio_API_TTS_Server: "eu-api.living.ai",
-		Livingio_TTS_Server:     "eu-tts.living.ai",
-		Livingio_RES_Server:     "res.living.ai",
-		PostFS:                  "/tmp/",
-		LogFileName:             "/var/log/emoProxy.log",
-		EnableDatabaseAndAPI:    false,
-		SqliteLocation:          "/var/data/emo_logs.db",
-	}
-
-	bytes, err := os.ReadFile(filename)
-	if err != nil {
-		conf = DefaultConf
-		return err
-	}
-
-	err = json.Unmarshal(bytes, &DefaultConf)
-	if err != nil {
-		conf = Configuration{}
-		return err
-	}
-
-	conf = DefaultConf
-	return nil
-}
-
-func writePid() {
-	if conf.PidFile != "" {
-		f, err := os.OpenFile(conf.PidFile, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
-		if err != nil {
-			log.Fatalf("Unable to create pid file : %v", err)
-		}
-		defer f.Close()
-
-		f.WriteString(fmt.Sprintf("%d", os.Getpid()))
-	}
 }
 
 func logRequest(r *http.Request) {
