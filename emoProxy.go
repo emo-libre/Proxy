@@ -9,7 +9,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"strconv"
 	"time"
@@ -25,53 +24,6 @@ type emo_code struct {
 	Errmessage string `json:"errmessage"`
 }
 
-type Intent struct {
-	Name       string  `json:"name,omitempty"`
-	Confidence float64 `json:"confidence,omitempty"`
-}
-
-type BehaviorParas struct {
-	UtilityType   string         `json:"utility_type,omitempty"`
-	Time          []string       `json:"time,omitempty"`
-	Txt           string         `json:"txt,omitempty"`
-	Url           string         `json:"url,omitempty"`
-	PreAnimation  string         `json:"pre_animation,omitempty"`
-	PostAnimation string         `json:"post_animation,omitempty"`
-	PostBehavior  string         `json:"post_behavior,omitempty"`
-	RecBehavior   string         `json:"rec_behavior,omitempty"`
-	BehaviorParas *BehaviorParas `json:"behavior_paras,omitempty"`
-	Sentiment     string         `json:"sentiment,omitempty"`
-	Listen        int            `json:"listen,omitempty"`
-	AnimationName string         `json:"animation_name,omitempty"`
-}
-
-type QueryResult struct {
-	ResultCode    string         `json:"resultCode,omitempty"`
-	QueryText     string         `json:"queryText,omitempty"`
-	Intent        *Intent        `json:"intent,omitempty"`
-	RecBehavior   string         `json:"rec_behavior,omitempty"`
-	BehaviorParas *BehaviorParas `json:"behavior_paras,omitempty"`
-}
-
-type QueryResponse struct {
-	QueryId      string       `json:"queryId,omitempty"`
-	QueryResult  *QueryResult `json:"queryResult,omitempty"`
-	LanguageCode string       `json:"languageCode,omitempty"`
-	Index        int          `json:"index,omitempty"`
-}
-
-type TokenResponse struct {
-	AccessToken string `json:"access_token,omitempty"`
-	ExpireIn    int    `json:"expire_in,omitempty"`
-	Type        string `json:"type,omitempty"`
-}
-
-type EmoSpeechResponse struct {
-	Code       int64  `json:"code"`
-	Errmessage string `json:"errmessage"`
-	Url        string `json:"url"`
-}
-
 type Configuration struct {
 	PidFile                 string `json:"pidFile"`
 	Livingio_API_Server     string `json:"livingio_api_server"`
@@ -81,6 +33,7 @@ type Configuration struct {
 	PostFS                  string `json:"postFS"`
 	LogFileName             string `json:"logFileName"`
 	EnableDatabaseAndAPI    bool   `json:"enableDatabaseAndAPI"`
+	EnableReplacements      bool   `json:"enableReplacements"`
 	SqliteLocation          string `json:"sqliteLocation"`
 	ChatGptSpeakServer      string `json:"chatGptSpeakServer"`
 }
@@ -153,6 +106,7 @@ func loadConfig(filename string) error {
 		PostFS:                  "/tmp/",
 		LogFileName:             "/var/log/emoProxy.log",
 		EnableDatabaseAndAPI:    false,
+		EnableReplacements:      false,
 		SqliteLocation:          "/var/data/emo_logs.db",
 		ChatGptSpeakServer:      "",
 	}
@@ -365,30 +319,12 @@ func makeApiRequest(r *http.Request) string {
 	body, _ := io.ReadAll(response.Body)
 	log.Println("Server response: ", string(body))
 
-	typedBody := QueryResponse{}
-	decoder := json.NewDecoder(bytes.NewReader([]byte(body)))
-	decoder.DisallowUnknownFields()
-
-	err = decoder.Decode(&typedBody)
-	if err != nil {
-		log.Println("Error when decoding JSON (", string(body), ") will return unhandled:", err)
-	} else {
-		if typedBody.QueryId != "" {
-			if typedBody.QueryResult.Intent.Name == "chatgpt_speak" && conf.ChatGptSpeakServer != "" {
-				speakResponse := makeChatGptSpeakRequest(typedBody.QueryResult.QueryText, typedBody.LanguageCode, typedBody.QueryResult.BehaviorParas.Txt, r)
-				if speakResponse.Url != "" && speakResponse.Txt != "" {
-					log.Println("Successfully replaced chatgpt_speak response for request.")
-					typedBody.QueryResult.BehaviorParas.Url = speakResponse.Url
-					typedBody.QueryResult.BehaviorParas.Txt = speakResponse.Txt
-				} else {
-					log.Println("Failed to get valid response from ChatGptSpeakServer, keeping original response.")
-				}
-			}
-			body, _ = json.Marshal(typedBody)
-		}
-	}
-
 	logResponse(response)
+
+	if conf.EnableReplacements {
+		log.Println("Replacements enabled, checking for replacements...")
+		body = runReplacementsAndReturnModifiedBody(body)
+	}
 
 	if useDatabaseAndAPI {
 		saveRequest(r.URL.RequestURI(), string(requestBody), string(body))
@@ -501,90 +437,4 @@ func makeResRequest(r *http.Request, w http.ResponseWriter) string {
 		saveRequest(r.URL.RequestURI(), "", string(body))
 	}
 	return string(body)
-}
-
-func makeEmoSpeechRequest(text string, languageCode string, r *http.Request) EmoSpeechResponse {
-	request, _ := http.NewRequest("GET", "https://"+conf.Livingio_API_Server+"/emo/speech/tts?q="+url.QueryEscape(text)+"&l="+url.QueryEscape(languageCode), nil)
-
-	val, exists := r.Header["Authorization"]
-	if exists {
-		request.Header.Add("Authorization", val[0])
-	}
-
-	val, exists = r.Header["Secret"]
-	if exists {
-		request.Header.Add("Secret", val[0])
-	}
-
-	request.Header.Del("User-Agent")
-
-	httpclient := &http.Client{}
-	response, err := httpclient.Do(request)
-
-	if err != nil {
-		log.Fatalf("An Error Occured %v", err)
-	}
-	defer response.Body.Close()
-
-	body, _ := io.ReadAll(response.Body)
-
-	var emoSpeechResponse EmoSpeechResponse
-	if err := json.Unmarshal([]byte(body), &emoSpeechResponse); err != nil {
-		log.Printf("Error unmarshaling ChatGptSpeakServer response: %v\n", err)
-		return EmoSpeechResponse{}
-	}
-
-	return emoSpeechResponse
-}
-
-func makeChatGptSpeakRequest(queryText string, languageCode string, fallbackResponse string, r *http.Request) BehaviorParas {
-	type ChatGptSpeakRequest struct {
-		QueryText        string `json:"queryText"`
-		LanguageCode     string `json:"languageCode"`
-		FallbackResponse string `json:"fallbackResponse,omitempty"`
-	}
-	type ChatGptSpeakResponse struct {
-		ResponseText string `json:"responseText"`
-	}
-
-	chatGptRequestData := ChatGptSpeakRequest{
-		QueryText:        queryText,
-		LanguageCode:     languageCode,
-		FallbackResponse: fallbackResponse,
-	}
-	chatGptRequestBody, _ := json.Marshal(chatGptRequestData)
-	chatGptRequest, _ := http.NewRequest("POST", conf.ChatGptSpeakServer+"/speak", bytes.NewBuffer(chatGptRequestBody))
-	chatGptRequest.Header.Add("Content-Type", "application/json")
-
-	chatGptClient := &http.Client{}
-	chatGptResponse, err := chatGptClient.Do(chatGptRequest)
-	if err != nil {
-		log.Fatalf("An Error Occured while calling ChatGptSpeakServer %v", err)
-	}
-	defer chatGptResponse.Body.Close()
-
-	chatGptResponseBody, _ := io.ReadAll(chatGptResponse.Body)
-
-	var chatGptTypedResponse ChatGptSpeakResponse
-	if err := json.Unmarshal([]byte(chatGptResponseBody), &chatGptTypedResponse); err != nil {
-		log.Printf("Error unmarshaling ChatGptSpeakServer response: %v\n", err)
-		return BehaviorParas{}
-	}
-
-	if chatGptTypedResponse.ResponseText == "" {
-		log.Println("ChatGptSpeakServer returned empty response text")
-		return BehaviorParas{}
-	}
-
-	emoSpeechResponse := makeEmoSpeechRequest(chatGptTypedResponse.ResponseText, languageCode, r)
-	if emoSpeechResponse.Code != 200 || emoSpeechResponse.Url == "" {
-		log.Printf("Error in EmoSpeechResponse: Code %d, Errmessage: %s\n", emoSpeechResponse.Code, emoSpeechResponse.Errmessage)
-		return BehaviorParas{}
-	}
-	behaviorParasResponse := BehaviorParas{
-		Txt: chatGptTypedResponse.ResponseText,
-		Url: emoSpeechResponse.Url,
-	}
-
-	return behaviorParasResponse
 }

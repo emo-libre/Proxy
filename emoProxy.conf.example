@@ -7,6 +7,8 @@
     "postFS": "/tmp/",
     "logFileName": "/var/log/emoProxyss.log",
     "enableDatabaseAndAPI": false, # For now, default behavior is still without db and api.
+    "enableReplacements": false, # For now, default behavior is still without replacements.
+    
     "sqliteLocation": "/var/data/emo_logs.db",
     "chatGptSpeakServer": ""
 }
