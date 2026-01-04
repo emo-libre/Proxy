@@ -323,7 +323,7 @@ func makeApiRequest(r *http.Request) string {
 
 	if conf.EnableReplacements {
 		log.Println("Replacements enabled, checking for replacements...")
-		body = runReplacementsAndReturnModifiedBody(body)
+		body = runReplacementsAndReturnModifiedBody(body, r)
 	}
 
 	if useDatabaseAndAPI {

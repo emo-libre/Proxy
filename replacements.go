@@ -9,7 +9,7 @@ import (
 	"net/url"
 )
 
-func runReplacementsAndReturnModifiedBody(body []byte) []byte {
+func runReplacementsAndReturnModifiedBody(body []byte, r *http.Request) []byte {
 	typedBody := QueryResponse{}
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
