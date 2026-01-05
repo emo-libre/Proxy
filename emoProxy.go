@@ -39,8 +39,7 @@ type Configuration struct {
 }
 
 var (
-	conf              Configuration
-	useDatabaseAndAPI bool = false
+	conf Configuration
 )
 
 func main() {
@@ -65,13 +64,15 @@ func main() {
 	log.Println("Starting app on port: ", *Port)
 
 	// redirect log
-	logFile, err := os.OpenFile(conf.LogFileName, os.O_APPEND|os.O_RDWR|os.O_CREATE, 0644)
-	if err != nil {
-		log.Panic(err)
+	if conf.LogFileName != "" {
+		logFile, err := os.OpenFile(conf.LogFileName, os.O_APPEND|os.O_RDWR|os.O_CREATE, 0644)
+		if err != nil {
+			log.Panic(err)
+		}
+		defer logFile.Close()
+		log.SetOutput(logFile)
 	}
 
-	defer logFile.Close()
-	log.SetOutput(logFile)
 	log.SetFlags(log.Lshortfile | log.LstdFlags)
 
 	registerEMOEndpoints()
@@ -326,7 +327,7 @@ func makeApiRequest(r *http.Request) string {
 		body = runReplacementsAndReturnModifiedBody(body, r)
 	}
 
-	if useDatabaseAndAPI {
+	if conf.EnableDatabaseAndAPI {
 		saveRequest(r.URL.RequestURI(), string(requestBody), string(body))
 	}
 	return string(body)
@@ -360,7 +361,7 @@ func makeTtsRequest(r *http.Request) string {
 	logBody(response.Header.Get("Content-Type"), body, "tts_")
 	logResponse(response)
 
-	if useDatabaseAndAPI {
+	if conf.EnableDatabaseAndAPI {
 		saveRequest(r.URL.RequestURI(), "", "")
 	}
 	return string(body)
@@ -394,7 +395,7 @@ func makeApiTtsRequest(r *http.Request) string {
 	logBody(response.Header.Get("Content-Type"), body, "apitts_")
 	logResponse(response)
 
-	if useDatabaseAndAPI {
+	if conf.EnableDatabaseAndAPI {
 		saveRequest(r.URL.RequestURI(), "", string(body))
 	}
 	return string(body)
@@ -433,7 +434,7 @@ func makeResRequest(r *http.Request, w http.ResponseWriter) string {
 
 	logResponse(response)
 
-	if useDatabaseAndAPI {
+	if conf.EnableDatabaseAndAPI {
 		saveRequest(r.URL.RequestURI(), "", string(body))
 	}
 	return string(body)

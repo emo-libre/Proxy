@@ -5,10 +5,9 @@
     "livingio_tts_server": "eu-tts.living.ai",
     "livingio_res_server": "res.living.ai",
     "postFS": "/tmp/",
-    "logFileName": "/var/log/emoProxyss.log",
+    "logFileName": "/var/log/emoProxy.log",
     "enableDatabaseAndAPI": false, # For now, default behavior is still without db and api.
     "enableReplacements": false, # For now, default behavior is still without replacements.
-    
     "sqliteLocation": "/var/data/emo_logs.db",
     "chatGptSpeakServer": ""
 }
