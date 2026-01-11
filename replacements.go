@@ -6,7 +6,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"net/url"
 )
 
 func runReplacementsAndReturnModifiedBody(body []byte, r *http.Request) []byte {
@@ -43,48 +42,23 @@ func runReplacementsAndReturnModifiedBody(body []byte, r *http.Request) []byte {
 	}
 }
 
-func makeEmoSpeechRequest(text string, languageCode string, r *http.Request) EmoSpeechResponse {
-	request, _ := http.NewRequest("GET", "https://"+conf.Livingio_API_Server+"/emo/speech/tts?q="+url.QueryEscape(text)+"&l="+url.QueryEscape(languageCode), nil)
-
-	val, exists := r.Header["Authorization"]
-	if exists {
-		request.Header.Add("Authorization", val[0])
-	}
-
-	val, exists = r.Header["Secret"]
-	if exists {
-		request.Header.Add("Secret", val[0])
-	}
-
-	request.Header.Del("User-Agent")
-
-	httpclient := &http.Client{}
-	response, err := httpclient.Do(request)
-
-	if err != nil {
-		log.Fatalf("An Error Occured %v", err)
-	}
-	defer response.Body.Close()
-
-	body, _ := io.ReadAll(response.Body)
-
-	var emoSpeechResponse EmoSpeechResponse
-	if err := json.Unmarshal([]byte(body), &emoSpeechResponse); err != nil {
-		log.Printf("Error unmarshaling ChatGptSpeakServer response: %v\n", err)
-		return EmoSpeechResponse{}
-	}
-
-	return emoSpeechResponse
-}
-
 func makeChatGptSpeakRequest(queryText string, languageCode string, fallbackResponse string, r *http.Request) BehaviorParas {
+
+	type EmoAutherizationHeaders struct {
+		Authorization string `json:"Authorization,omitempty"`
+		Secret        string `json:"Secret,omitempty"`
+	}
 	type ChatGptSpeakRequest struct {
-		QueryText        string `json:"queryText"`
-		LanguageCode     string `json:"languageCode"`
-		FallbackResponse string `json:"fallbackResponse,omitempty"`
+		QueryText            string                  `json:"queryText"`
+		LanguageCode         string                  `json:"languageCode"`
+		FallbackResponse     string                  `json:"fallbackResponse,omitempty"`
+		AutherizationHeaders EmoAutherizationHeaders `json:"authorizationHeaders,omitempty"`
 	}
 	type ChatGptSpeakResponse struct {
-		ResponseText string `json:"responseText"`
+		StatusCode        int    `json:"statusCode"`
+		StatusMessage     string `json:"statusMessage"`
+		ResponseText      string `json:"responseText"`
+		ResponseSpeechUrl string `json:"responseSpeechUrl"`
 	}
 
 	chatGptRequestData := ChatGptSpeakRequest{
@@ -92,6 +66,17 @@ func makeChatGptSpeakRequest(queryText string, languageCode string, fallbackResp
 		LanguageCode:     languageCode,
 		FallbackResponse: fallbackResponse,
 	}
+
+	authorizationHeader, authHeaderexists := r.Header["Authorization"]
+	secretVal, secretExists := r.Header["Secret"]
+	if authHeaderexists && secretExists {
+		authHeaders := EmoAutherizationHeaders{
+			Authorization: authorizationHeader[0],
+			Secret:        secretVal[0],
+		}
+		chatGptRequestData.AutherizationHeaders = authHeaders
+	}
+
 	chatGptRequestBody, _ := json.Marshal(chatGptRequestData)
 	chatGptRequest, _ := http.NewRequest("POST", conf.ChatGptSpeakServer+"/speak", bytes.NewBuffer(chatGptRequestBody))
 	chatGptRequest.Header.Add("Content-Type", "application/json")
@@ -111,19 +96,22 @@ func makeChatGptSpeakRequest(queryText string, languageCode string, fallbackResp
 		return BehaviorParas{}
 	}
 
+	if chatGptTypedResponse.StatusCode != 200 {
+		log.Printf("ChatGptSpeakServer returned non-200 status: %d, message: %s\n", chatGptTypedResponse.StatusCode, chatGptTypedResponse.StatusMessage)
+		return BehaviorParas{}
+	}
 	if chatGptTypedResponse.ResponseText == "" {
 		log.Println("ChatGptSpeakServer returned empty response text")
 		return BehaviorParas{}
 	}
-
-	emoSpeechResponse := makeEmoSpeechRequest(chatGptTypedResponse.ResponseText, languageCode, r)
-	if emoSpeechResponse.Code != 200 || emoSpeechResponse.Url == "" {
-		log.Printf("Error in EmoSpeechResponse: Code %d, Errmessage: %s\n", emoSpeechResponse.Code, emoSpeechResponse.Errmessage)
+	if chatGptTypedResponse.ResponseSpeechUrl == "" {
+		log.Println("ChatGptSpeakServer returned empty response speech URL")
 		return BehaviorParas{}
 	}
+
 	behaviorParasResponse := BehaviorParas{
 		Txt: chatGptTypedResponse.ResponseText,
-		Url: emoSpeechResponse.Url,
+		Url: chatGptTypedResponse.ResponseSpeechUrl,
 	}
 
 	return behaviorParasResponse
