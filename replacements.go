@@ -55,6 +55,8 @@ func makeChatGptSpeakRequest(queryText string, languageCode string, fallbackResp
 		AutherizationHeaders EmoAutherizationHeaders `json:"authorizationHeaders,omitempty"`
 	}
 	type ChatGptSpeakResponse struct {
+		StatusCode        int    `json:"statusCode"`
+		StatusMessage     string `json:"statusMessage"`
 		ResponseText      string `json:"responseText"`
 		ResponseSpeechUrl string `json:"responseSpeechUrl"`
 	}
@@ -94,11 +96,14 @@ func makeChatGptSpeakRequest(queryText string, languageCode string, fallbackResp
 		return BehaviorParas{}
 	}
 
+	if chatGptTypedResponse.StatusCode != 200 {
+		log.Printf("ChatGptSpeakServer returned non-200 status: %d, message: %s\n", chatGptTypedResponse.StatusCode, chatGptTypedResponse.StatusMessage)
+		return BehaviorParas{}
+	}
 	if chatGptTypedResponse.ResponseText == "" {
 		log.Println("ChatGptSpeakServer returned empty response text")
 		return BehaviorParas{}
 	}
-
 	if chatGptTypedResponse.ResponseSpeechUrl == "" {
 		log.Println("ChatGptSpeakServer returned empty response speech URL")
 		return BehaviorParas{}
