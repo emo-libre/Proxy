@@ -10,7 +10,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -261,20 +263,51 @@ func logResponse(r *http.Response) {
 	}
 }
 
-func logBody(contentType string, body []byte, prefix string) {
+func extensionForContentType(contentType string) string {
+	switch contentType {
+	case "application/json":
+		return ".json"
+	case "application/octet-stream":
+		return ".wav"
+	case "audio/mpeg":
+		return ".mp3"
+	default:
+		return ".bin"
+	}
+}
+
+// sanitizeFilename strips any directory components so the result is safe to
+// join onto the log directory (protects against path traversal via "..").
+func sanitizeFilename(name string) string {
+	if name == "" {
+		return ""
+	}
+	base := filepath.Base(name)
+	if base == "." || base == string(filepath.Separator) {
+		return ""
+	}
+	return base
+}
+
+func logBody(contentType string, body []byte, prefix string, originalName string) {
 	// write post request body to fs
 	dir := conf.PostFS + time.Now().Format("20060102/")
 	os.MkdirAll(dir, os.ModePerm)
-	switch contentType {
-	case "application/json":
-		os.WriteFile(dir+"emo_"+prefix+fmt.Sprint(time.Now().Unix())+".json", body, 0644)
-	case "application/octet-stream":
-		os.WriteFile(dir+"emo_"+prefix+fmt.Sprint(time.Now().Unix())+".wav", body, 0644)
-	case "audio/mpeg":
-		os.WriteFile(dir+"emo_"+prefix+fmt.Sprint(time.Now().Unix())+".mp3", body, 0644)
-	default:
-		os.WriteFile(dir+"emo_"+prefix+fmt.Sprint(time.Now().Unix())+".bin", body, 0644)
+
+	base := sanitizeFilename(originalName)
+	if base != "" {
+		ext := filepath.Ext(base)
+		nameNoExt := strings.TrimSuffix(base, ext)
+		if ext == "" {
+			ext = extensionForContentType(contentType)
+		}
+		filename := fmt.Sprintf("emo_%s%s_%d%s", prefix, nameNoExt, time.Now().Unix(), ext)
+		os.WriteFile(dir+filename, body, 0644)
+		return
 	}
+
+	ext := extensionForContentType(contentType)
+	os.WriteFile(dir+"emo_"+prefix+fmt.Sprint(time.Now().Unix())+ext, body, 0644)
 }
 
 func makeApiRequest(r *http.Request) string {
@@ -287,7 +320,7 @@ func makeApiRequest(r *http.Request) string {
 		requestBody, _ := io.ReadAll(r.Body)
 
 		// write post request body to fs
-		logBody(r.Header.Get("Content-Type"), requestBody, "apiReq_")
+		logBody(r.Header.Get("Content-Type"), requestBody, "apiReq_", filepath.Base(r.URL.Path))
 
 		request, _ = http.NewRequest("POST", "https://"+conf.Livingio_API_Server+r.URL.RequestURI(), bytes.NewBuffer(requestBody))
 
@@ -358,7 +391,7 @@ func makeTtsRequest(r *http.Request) string {
 
 	body, _ := io.ReadAll(response.Body)
 
-	logBody(response.Header.Get("Content-Type"), body, "tts_")
+	logBody(response.Header.Get("Content-Type"), body, "tts_", filepath.Base(r.URL.Path))
 	logResponse(response)
 
 	if conf.EnableDatabaseAndAPI {
@@ -392,7 +425,12 @@ func makeApiTtsRequest(r *http.Request) string {
 
 	body, _ := io.ReadAll(response.Body)
 
-	logBody(response.Header.Get("Content-Type"), body, "apitts_")
+	// /tts/dl/ paths are hash-based IDs whose trailing ".digits" is not a real
+	// extension (e.g. "2026010362367669588438668e77.47019454") - replace the dot
+	// with "_" so the full ID is kept but logBody derives the extension from the
+	// Content-Type instead of the (fake) one in the ID.
+	apiTtsName := strings.ReplaceAll(filepath.Base(r.URL.Path), ".", "_")
+	logBody(response.Header.Get("Content-Type"), body, "apitts_", apiTtsName)
 	logResponse(response)
 
 	if conf.EnableDatabaseAndAPI {
@@ -426,7 +464,7 @@ func makeResRequest(r *http.Request, w http.ResponseWriter) string {
 
 	body, _ := io.ReadAll(response.Body)
 
-	logBody(response.Header.Get("Content-Type"), body, "res_")
+	logBody(response.Header.Get("Content-Type"), body, "res_", filepath.Base(r.URL.Path))
 
 	for k := range response.Header {
 		w.Header().Set(k, response.Header.Get(k))
