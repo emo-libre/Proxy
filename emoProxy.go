@@ -290,6 +290,10 @@ func sanitizeFilename(name string) string {
 }
 
 func logBody(contentType string, body []byte, prefix string, originalName string) {
+	if len(body) == 0 {
+		return
+	}
+
 	// write post request body to fs
 	dir := conf.PostFS + time.Now().Format("20060102/")
 	os.MkdirAll(dir, os.ModePerm)
